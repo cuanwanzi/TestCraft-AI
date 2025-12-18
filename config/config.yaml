@@ -1,0 +1,48 @@
+# config/config.yaml
+system:
+  name: "汽车测试用例生成系统"
+  version: "1.0.0"
+  environment: "development"
+  debug: true
+
+deepseek:
+  api_key: "${DEEPSEEK_API_KEY}"
+  base_url: "https://api.deepseek.com"
+  default_model: "deepseek-chat"
+  timeout: 60
+  max_retries: 3
+
+knowledge_base:
+  vector_db_path: "./data/knowledge_base"
+  relational_db_path: "./data/knowledge_base/knowledge.db"
+  embedding_model: "BAAI/bge-small-zh-v1.5"
+  initial_knowledge_path: "./config/initial_knowledge.json"
+
+templates:
+  storage_path: "./data/templates"
+  learning_interval: 50  # 每50次生成学习一次
+  quality_threshold: 80  # 质量阈值
+
+workflow:
+  max_concurrent_tasks: 5
+  timeout_seconds: 300
+  callback_timeout: 30
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_path: "./data/logs/app.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  reload: true
+  cors_origins: ["*"]
+
+frontend:
+  host: "0.0.0.0"
+  port: 8501
+  api_url: "http://localhost:8000"
