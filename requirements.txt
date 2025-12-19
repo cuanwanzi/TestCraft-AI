@@ -1,17 +1,15 @@
-fastapi>=0.104.1
+# requirements_simple.txt
+fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
-python-dotenv>=1.0.0
 aiohttp>=3.9.0
-asyncio>=3.4.3
 pydantic>=2.5.0
-chromadb>=0.4.15
+chromadb>=0.5.0  # 新版 ChromaDB
 sentence-transformers>=2.2.2
-sqlalchemy>=2.0.0
 streamlit>=1.28.0
-PyPDF2>=3.0.1
-python-docx>=1.1.0
+python-dotenv>=1.0.0
+sqlalchemy>=2.0.0
+numpy>=1.24.0
 pandas>=2.1.0
 psutil>=5.9.0
-numpy>=1.24.0
-redis>=5.0.0
-qdrant-client>=1.6.0
+python-docx>=1.1.0
+PyPDF2>=3.0.1
