@@ -53,7 +53,7 @@ class TestCase:
     test_data: Dict[str, Any]
     constraints: List[Dict[str, Any]]
     standards: List[str]
-    metadata: Dict[str, Any]
+    meta_data: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -710,7 +710,7 @@ class TestCaseGenerator:
         """生成测试数据"""
         
         test_data = {
-            "metadata": {
+            "meta_data": {
                 "generated_at": datetime.now().isoformat(),
                 "requirement": requirement[:100],
                 "domain": classification.domain.value,
@@ -868,7 +868,7 @@ class TestCaseGenerator:
                 constraint_info.append(asdict(constraint))
         
         # 构建元数据
-        metadata = {
+        meta_data = {
             "generation_method": "template_based" if template else "ai_generated",
             "template_used": template.get("id") if template else None,
             "classification_confidence": classification.confidence,
@@ -891,7 +891,7 @@ class TestCaseGenerator:
             test_data=test_data,
             constraints=constraint_info,
             standards=classification.standards,
-            metadata=metadata,
+            meta_data=meta_data,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -926,7 +926,7 @@ async def main():
         reasoning="匹配VCU和HIL测试关键词",
         constraints=["响应时间<100ms", "符合ISO 26262 ASIL C"],
         standards=["ISO 26262"],
-        metadata={}
+        meta_data={}
     )
     
     # 模拟规范分析结果

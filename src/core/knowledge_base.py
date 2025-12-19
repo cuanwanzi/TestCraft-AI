@@ -41,7 +41,7 @@ class KnowledgeItem:
     tags: List[str]
     source: str
     confidence: float
-    metadata: Dict[str, Any]
+    meta_data: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -56,7 +56,7 @@ class KnowledgeRecord(Base):
     tags = Column(JSON, default=[])  # List of strings
     source = Column(String, nullable=False)
     confidence = Column(Float, default=1.0)
-    metadata = Column(JSON, default={})
+    meta_data = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     usage_count = Column(Integer, default=0)
@@ -108,7 +108,7 @@ class KnowledgeBase:
             try:
                 client.create_collection(
                     name=collection_name,
-                    metadata={"description": description}
+                    meta_data={"description": description}
                 )
                 logger.info(f"创建集合: {collection_name}")
             except Exception as e:
@@ -123,7 +123,7 @@ class KnowledgeBase:
         db_url = f"sqlite:///{db_path}"
         
         engine = create_engine(db_url)
-        Base.metadata.create_all(engine)
+        Base.meta_data.create_all(engine)
         
         Session = sessionmaker(bind=engine)
         session = Session()
@@ -157,7 +157,7 @@ class KnowledgeBase:
                     domain=item["domain"],
                     tags=item.get("tags", []),
                     source=item["source"],
-                    metadata=item.get("metadata", {})
+                    meta_data=item.get("meta_data", {})
                 )
             
             logger.info(f"加载初始知识: {len(initial_knowledge)} 项")
@@ -168,7 +168,7 @@ class KnowledgeBase:
                           domain: str,
                           tags: List[str],
                           source: str,
-                          metadata: Optional[Dict[str, Any]] = None) -> str:
+                          meta_data: Optional[Dict[str, Any]] = None) -> str:
         """添加知识项"""
         
         # 生成唯一ID
@@ -183,7 +183,7 @@ class KnowledgeBase:
             tags=tags,
             source=source,
             confidence=1.0,
-            metadata=metadata or {},
+            meta_data=meta_data or {},
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -196,7 +196,7 @@ class KnowledgeBase:
             domain=domain,
             tags=tags,
             source=source,
-            metadata=metadata or {},
+            meta_data=meta_data or {},
             confidence=1.0
         )
         
@@ -212,7 +212,7 @@ class KnowledgeBase:
         collection.add(
             embeddings=[embedding],
             documents=[content],
-            metadatas=[{
+            meta_datas=[{
                 "id": item_id,
                 "type": type.value,
                 "domain": domain,
@@ -274,23 +274,23 @@ class KnowledgeBase:
                     query_embeddings=[query_embedding],
                     n_results=top_k,
                     where=where_filter if where_filter else None,
-                    include=["documents", "metadatas", "distances"]
+                    include=["documents", "meta_datas", "distances"]
                 )
                 
                 # 处理结果
                 if query_results["documents"]:
                     for i in range(len(query_results["documents"][0])):
-                        metadata = query_results["metadatas"][0][i]
+                        meta_data = query_results["meta_datas"][0][i]
                         
                         knowledge_item = KnowledgeItem(
-                            id=metadata.get("id", f"unknown_{i}"),
+                            id=meta_data.get("id", f"unknown_{i}"),
                             content=query_results["documents"][0][i],
-                            type=KnowledgeType(metadata.get("type", "general")),
-                            domain=metadata.get("domain", ""),
-                            tags=json.loads(metadata.get("tags", "[]")),
-                            source=metadata.get("source", ""),
+                            type=KnowledgeType(meta_data.get("type", "general")),
+                            domain=meta_data.get("domain", ""),
+                            tags=json.loads(meta_data.get("tags", "[]")),
+                            source=meta_data.get("source", ""),
                             confidence=1.0 - query_results["distances"][0][i],
-                            metadata={},
+                            meta_data={},
                             created_at=datetime.now(),
                             updated_at=datetime.now()
                         )
@@ -325,25 +325,25 @@ class KnowledgeBase:
         }
         
         for record in records:
-            metadata = record.metadata or {}
+            meta_data = record.meta_data or {}
             
-            if "function" in metadata.get("category", ""):
+            if "function" in meta_data.get("category", ""):
                 controller_knowledge["functions"].append({
-                    "name": metadata.get("name", ""),
+                    "name": meta_data.get("name", ""),
                     "description": record.content,
-                    "parameters": metadata.get("parameters", [])
+                    "parameters": meta_data.get("parameters", [])
                 })
-            elif "interface" in metadata.get("category", ""):
+            elif "interface" in meta_data.get("category", ""):
                 controller_knowledge["interfaces"].append({
-                    "type": metadata.get("interface_type", ""),
-                    "protocol": metadata.get("protocol", ""),
+                    "type": meta_data.get("interface_type", ""),
+                    "protocol": meta_data.get("protocol", ""),
                     "description": record.content
                 })
-            elif "test" in metadata.get("category", ""):
+            elif "test" in meta_data.get("category", ""):
                 controller_knowledge["test_points"].append({
-                    "test_type": metadata.get("test_type", ""),
+                    "test_type": meta_data.get("test_type", ""),
                     "description": record.content,
-                    "expected_result": metadata.get("expected_result", "")
+                    "expected_result": meta_data.get("expected_result", "")
                 })
         
         return controller_knowledge
@@ -364,12 +364,12 @@ class KnowledgeBase:
         
         for item in knowledge_items:
             pattern = {
-                "name": item.metadata.get("name", f"模式_{item.id}"),
+                "name": item.meta_data.get("name", f"模式_{item.id}"),
                 "description": item.content,
-                "steps": item.metadata.get("steps", []),
-                "applicable_scenarios": item.metadata.get("applicable_scenarios", []),
-                "success_rate": item.metadata.get("success_rate", 0.0),
-                "usage_count": item.metadata.get("usage_count", 0)
+                "steps": item.meta_data.get("steps", []),
+                "applicable_scenarios": item.meta_data.get("applicable_scenarios", []),
+                "success_rate": item.meta_data.get("success_rate", 0.0),
+                "usage_count": item.meta_data.get("usage_count", 0)
             }
             patterns.append(pattern)
         
@@ -408,7 +408,7 @@ class KnowledgeBase:
         """导出知识库"""
         
         export_data = {
-            "metadata": {
+            "meta_data": {
                 "export_time": datetime.now().isoformat(),
                 "total_items": 0,
                 "knowledge_types": {}
@@ -428,7 +428,7 @@ class KnowledgeBase:
                 "tags": record.tags,
                 "source": record.source,
                 "confidence": record.confidence,
-                "metadata": record.metadata,
+                "meta_data": record.meta_data,
                 "usage_count": record.usage_count,
                 "success_rate": record.success_rate,
                 "created_at": record.created_at.isoformat() if record.created_at else None,
@@ -438,11 +438,11 @@ class KnowledgeBase:
             export_data["knowledge_items"].append(knowledge_item)
             
             # 更新统计信息
-            export_data["metadata"]["total_items"] += 1
+            export_data["meta_data"]["total_items"] += 1
             knowledge_type = record.type
-            if knowledge_type not in export_data["metadata"]["knowledge_types"]:
-                export_data["metadata"]["knowledge_types"][knowledge_type] = 0
-            export_data["metadata"]["knowledge_types"][knowledge_type] += 1
+            if knowledge_type not in export_data["meta_data"]["knowledge_types"]:
+                export_data["meta_data"]["knowledge_types"][knowledge_type] = 0
+            export_data["meta_data"]["knowledge_types"][knowledge_type] += 1
         
         # 保存到文件
         export_path_obj = Path(export_path)
@@ -453,7 +453,7 @@ class KnowledgeBase:
         
         logger.info(f"知识库导出完成: {export_path}")
         
-        return export_data["metadata"]["total_items"]
+        return export_data["meta_data"]["total_items"]
     
     def import_knowledge(self, import_path: str):
         """导入知识库"""
@@ -478,7 +478,7 @@ class KnowledgeBase:
                     # 更新现有记录
                     existing.content = item_data["content"]
                     existing.tags = item_data.get("tags", [])
-                    existing.metadata = item_data.get("metadata", {})
+                    existing.meta_data = item_data.get("meta_data", {})
                     existing.updated_at = datetime.now()
                 else:
                     # 创建新记录
@@ -491,7 +491,7 @@ class KnowledgeBase:
                         domain=item_data.get("domain", "general"),
                         tags=item_data.get("tags", []),
                         source=item_data.get("source", "import"),
-                        metadata=item_data.get("metadata", {}),
+                        meta_data=item_data.get("meta_data", {}),
                         confidence=item_data.get("confidence", 1.0),
                         usage_count=item_data.get("usage_count", 0),
                         success_rate=item_data.get("success_rate", 0.0)
@@ -508,7 +508,7 @@ class KnowledgeBase:
                     collection.add(
                         embeddings=[embedding],
                         documents=[item_data["content"]],
-                        metadatas=[{
+                        meta_datas=[{
                             "id": item_data["id"],
                             "type": knowledge_type,
                             "domain": item_data.get("domain", "general"),
@@ -538,7 +538,7 @@ INITIAL_KNOWLEDGE = [
         "domain": "HIL测试",
         "tags": ["基础概念", "测试方法"],
         "source": "行业最佳实践",
-        "metadata": {
+        "meta_data": {
             "category": "concept",
             "complexity": "low"
         }
@@ -549,7 +549,7 @@ INITIAL_KNOWLEDGE = [
         "domain": "VCU",
         "tags": ["功能说明", "控制器"],
         "source": "技术文档",
-        "metadata": {
+        "meta_data": {
             "category": "function",
             "name": "VCU基本功能"
         }
@@ -560,7 +560,7 @@ INITIAL_KNOWLEDGE = [
         "domain": "安全测试",
         "tags": ["测试模式", "故障注入"],
         "source": "测试经验",
-        "metadata": {
+        "meta_data": {
             "name": "故障注入测试模式",
             "steps": ["设置", "注入", "监控", "验证", "恢复"],
             "success_rate": 0.95
@@ -589,7 +589,7 @@ def create_initial_knowledge():
             domain=item["domain"],
             tags=item["tags"],
             source=item["source"],
-            metadata=item.get("metadata", {})
+            meta_data=item.get("meta_data", {})
         )
     
     print("初始知识库创建完成")
