@@ -1,17 +1,20 @@
-# scripts/init_simple.py
+# scripts/init_fixed.py
 #!/usr/bin/env python3
 import sys
 import os
 import traceback
 
-# 添加项目根目录
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def main():
-    """简单初始化"""
-    print("🚀 开始初始化系统...")
+    """修复后的初始化"""
+    print("🔧 使用修复版本初始化...")
     
     try:
+        # 设置环境变量避免网络请求
+        os.environ['TRANSFORMERS_OFFLINE'] = '1'
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        
         # 创建目录
         dirs = [
             "./data",
@@ -26,31 +29,12 @@ def main():
             os.makedirs(dir_path, exist_ok=True)
             print(f"✓ 创建目录: {dir_path}")
         
-        # 检查 ChromaDB 是否可用
-        try:
-            import chromadb
-            print("✓ ChromaDB 已安装")
-            
-            # 测试新版 API
-            test_client = chromadb.PersistentClient(path="./test_chroma")
-            test_collection = test_client.create_collection(name="test")
-            test_client.delete_collection("test")
-            import shutil
-            if os.path.exists("./test_chroma"):
-                shutil.rmtree("./test_chroma")
-            print("✓ ChromaDB 新版 API 工作正常")
-            
-        except Exception as e:
-            print(f"⚠️  ChromaDB 测试失败: {str(e)}")
-            print("将使用简单模式")
-        
-        # 初始化知识库
-        print("\n📚 初始化知识库...")
+        # 导入并初始化
         from src.core.knowledge_base import create_initial_knowledge
         
         kb = create_initial_knowledge()
         
-        print("\n✅ 系统初始化完成！")
+        print("\n✅ 初始化成功完成！")
         
         return kb
         

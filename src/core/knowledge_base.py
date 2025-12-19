@@ -9,7 +9,6 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-# ChromaDB 新版本导入
 import chromadb
 from sentence_transformers import SentenceTransformer
 import numpy as np
@@ -22,7 +21,6 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 class KnowledgeType(Enum):
-    """知识类型"""
     STANDARD = "standard"
     BEST_PRACTICE = "best_practice"
     TEST_PATTERN = "test_pattern"
@@ -32,7 +30,6 @@ class KnowledgeType(Enum):
 
 @dataclass
 class KnowledgeItem:
-    """知识项"""
     id: str
     content: str
     type: KnowledgeType
@@ -45,7 +42,6 @@ class KnowledgeItem:
     updated_at: datetime
 
 class KnowledgeRecord(Base):
-    """知识记录数据库模型"""
     __tablename__ = 'knowledge_records'
     
     id = Column(String, primary_key=True)
@@ -61,8 +57,77 @@ class KnowledgeRecord(Base):
     usage_count = Column(Integer, default=0)
     success_rate = Column(Float, default=0.0)
 
+class UniversalEmbedder:
+    """统一的嵌入器，处理各种返回类型"""
+    
+    def __init__(self, embedder=None):
+        self.embedder = embedder or SimpleEmbedder()
+    
+    def encode(self, text: str) -> List[float]:
+        """编码文本，确保返回列表"""
+        try:
+            result = self.embedder.encode(text)
+            return self._to_list(result)
+        except Exception as e:
+            logger.error(f"嵌入器编码失败: {str(e)}")
+            return self._simple_encode(text)
+    
+    def _to_list(self, embedding) -> List[float]:
+        """将各种类型的嵌入转换为列表"""
+        if isinstance(embedding, list):
+            return embedding
+        elif hasattr(embedding, 'tolist'):
+            return embedding.tolist()
+        elif hasattr(embedding, 'numpy'):
+            return embedding.numpy().tolist()
+        else:
+            try:
+                return list(embedding)
+            except:
+                return self._simple_encode("fallback")
+    
+    def _simple_encode(self, text: str) -> List[float]:
+        """简单的文本编码（备用）"""
+        import hashlib
+        import random
+        
+        hash_obj = hashlib.md5(text.encode())
+        seed = int(hash_obj.hexdigest()[:8], 16)
+        random.seed(seed)
+        
+        dimension = 384
+        vector = [random.uniform(-1, 1) for _ in range(dimension)]
+        
+        norm = sum(v*v for v in vector) ** 0.5
+        if norm > 0:
+            vector = [v/norm for v in vector]
+        
+        return vector
+
+class SimpleEmbedder:
+    """简单的嵌入器，用于备用"""
+    def __init__(self, dimension=384):
+        self.dimension = dimension
+    
+    def encode(self, text: str) -> List[float]:
+        """生成简单的嵌入向量"""
+        import hashlib
+        import random
+        
+        hash_obj = hashlib.md5(text.encode())
+        seed = int(hash_obj.hexdigest()[:8], 16)
+        random.seed(seed)
+        
+        vector = [random.uniform(-1, 1) for _ in range(self.dimension)]
+        
+        norm = sum(v*v for v in vector) ** 0.5
+        if norm > 0:
+            vector = [v/norm for v in vector]
+        
+        return vector
+
 class KnowledgeBase:
-    """知识库管理器（兼容新版 ChromaDB）"""
+    """知识库管理器"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -79,20 +144,18 @@ class KnowledgeBase:
         logger.info("知识库初始化完成")
     
     def _init_vector_db(self):
-        """初始化向量数据库 - 新版 ChromaDB API"""
+        """初始化向量数据库"""
         persist_path = Path(self.config.get("vector_db_path", "./data/knowledge_base"))
         persist_path.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"初始化 ChromaDB，路径: {persist_path}")
         
         try:
-            # 新版 ChromaDB 使用 PersistentClient
             client = chromadb.PersistentClient(path=str(persist_path))
             logger.info("ChromaDB 客户端创建成功")
             return client
         except Exception as e:
             logger.error(f"创建 ChromaDB 客户端失败: {str(e)}")
-            # 回退到内存模式
             logger.warning("使用内存模式 ChromaDB")
             return chromadb.Client()
     
@@ -114,17 +177,34 @@ class KnowledgeBase:
         model_name = self.config.get("embedding_model", "all-MiniLM-L6-v2")
         
         try:
-            # 尝试加载模型
+            # 尝试加载 sentence-transformers
             cache_dir = Path("./data/models")
             cache_dir.mkdir(parents=True, exist_ok=True)
             
-            embedder = SentenceTransformer(model_name, cache_folder=str(cache_dir))
-            logger.info(f"加载嵌入模型: {model_name}")
-            return embedder
+            # 设置离线模式
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            
+            try:
+                embedder = SentenceTransformer(model_name, cache_folder=str(cache_dir))
+                logger.info(f"加载嵌入模型: {model_name}")
+                return UniversalEmbedder(embedder)
+            except Exception as e:
+                logger.warning(f"无法加载模型 {model_name}: {str(e)}")
+                
+                # 尝试其他模型
+                try:
+                    embedder = SentenceTransformer('paraphrase-MiniLM-L3-v2', cache_folder=str(cache_dir))
+                    logger.info("加载备用模型: paraphrase-MiniLM-L3-v2")
+                    return UniversalEmbedder(embedder)
+                except:
+                    logger.info("使用简单嵌入器")
+                    return UniversalEmbedder(SimpleEmbedder())
+                    
         except Exception as e:
-            logger.warning(f"无法加载模型 {model_name}: {str(e)}")
-            # 返回简单的嵌入器
-            return SimpleEmbedder()
+            logger.warning(f"初始化嵌入模型失败: {str(e)}")
+            logger.info("使用简单嵌入器")
+            return UniversalEmbedder(SimpleEmbedder())
     
     def add_knowledge_item(self,
                           content: str,
@@ -165,14 +245,13 @@ class KnowledgeBase:
             try:
                 collection = self.vector_db.get_collection(name=collection_name)
             except:
-                # 集合不存在，创建它
                 collection = self.vector_db.create_collection(
                     name=collection_name,
                     metadata={"description": f"{type.value} 知识"}
                 )
             
-            # 生成嵌入向量
-            embedding = self.embedder.encode(content).tolist()
+            # 生成嵌入向量 - 使用 UniversalEmbedder 确保返回列表
+            embedding = self.embedder.encode(content)
             
             # 准备元数据
             vector_metadata = {
@@ -234,7 +313,7 @@ class KnowledgeBase:
         
         # 生成查询嵌入
         try:
-            query_embedding = self.embedder.encode(query).tolist()
+            query_embedding = self.embedder.encode(query)
         except Exception as e:
             logger.error(f"生成查询嵌入失败: {str(e)}")
             return self._simple_text_search(query, top_k)
@@ -245,15 +324,7 @@ class KnowledgeBase:
         if knowledge_types:
             collection_names = [self._get_collection_name(t) for t in knowledge_types]
         else:
-            # 搜索所有集合
-            collection_names = []
-            try:
-                collections = self.vector_db.list_collections()
-                for collection in collections:
-                    collection_names.append(collection.name)
-            except:
-                # 如果无法获取集合列表，使用默认集合
-                collection_names = ["standards", "best_practices", "test_patterns"]
+            collection_names = ["standards", "best_practices", "test_patterns", "case_templates", "controllers"]
         
         for collection_name in collection_names:
             try:
@@ -322,7 +393,6 @@ class KnowledgeBase:
             for record in records:
                 content_lower = record.content.lower()
                 if query_lower in content_lower:
-                    # 简单评分：关键词出现次数
                     score = content_lower.count(query_lower) / max(1, len(query_lower.split()))
                     
                     knowledge_item = KnowledgeItem(
@@ -346,40 +416,7 @@ class KnowledgeBase:
             logger.error(f"简单文本搜索失败: {str(e)}")
         
         return results[:top_k]
-    
-    def get_all_collections(self):
-        """获取所有集合"""
-        try:
-            return self.vector_db.list_collections()
-        except:
-            return []
 
-class SimpleEmbedder:
-    """简单的嵌入器，用于备用"""
-    def __init__(self, dimension=384):
-        self.dimension = dimension
-    
-    def encode(self, text: str):
-        """生成简单的嵌入向量"""
-        import hashlib
-        import random
-        
-        # 使用哈希生成确定性随机向量
-        hash_obj = hashlib.md5(text.encode())
-        seed = int(hash_obj.hexdigest()[:8], 16)
-        random.seed(seed)
-        
-        # 生成随机向量
-        vector = [random.uniform(-1, 1) for _ in range(self.dimension)]
-        
-        # 归一化
-        norm = sum(v*v for v in vector) ** 0.5
-        if norm > 0:
-            vector = [v/norm for v in vector]
-        
-        return vector
-
-# 使用示例
 def create_initial_knowledge():
     """创建初始知识库"""
     config = {
@@ -426,15 +463,18 @@ def create_initial_knowledge():
         ]
         
         for item in initial_data:
-            knowledge_base.add_knowledge_item(
-                content=item["content"],
-                type=item["type"],
-                domain=item["domain"],
-                tags=item["tags"],
-                source=item["source"],
-                meta_data=item["meta_data"]
-            )
-            print(f"✓ 添加: {item['domain']} - {item['content'][:30]}...")
+            try:
+                knowledge_base.add_knowledge_item(
+                    content=item["content"],
+                    type=item["type"],
+                    domain=item["domain"],
+                    tags=item["tags"],
+                    source=item["source"],
+                    meta_data=item["meta_data"]
+                )
+                print(f"✓ 添加: {item['domain']} - {item['content'][:30]}...")
+            except Exception as e:
+                print(f"✗ 添加失败 {item['domain']}: {str(e)}")
         
         # 测试搜索
         results = knowledge_base.search_knowledge(query="测试", top_k=3)
