@@ -1,4 +1,3 @@
-# src/core/knowledge_base.py
 import os
 import json
 import sqlite3
@@ -41,7 +40,7 @@ class KnowledgeItem:
     tags: List[str]
     source: str
     confidence: float
-    meta_data: Dict[str, Any]
+    meta_data: Dict[str, Any]  # 使用 meta_data 而不是 metadata
     created_at: datetime
     updated_at: datetime
 
@@ -53,10 +52,10 @@ class KnowledgeRecord(Base):
     content = Column(Text, nullable=False)
     type = Column(String, nullable=False)  # KnowledgeType value
     domain = Column(String, nullable=False)
-    tags = Column(JSON, default=[])  # List of strings
+    tags = Column(JSON, default=[])
     source = Column(String, nullable=False)
     confidence = Column(Float, default=1.0)
-    meta_data = Column(JSON, default={})
+    meta_data = Column(JSON, default={})  # 使用 meta_data
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     usage_count = Column(Integer, default=0)
@@ -83,19 +82,22 @@ class KnowledgeBase:
         logger.info("知识库初始化完成")
     
     def _init_vector_db(self) -> chromadb.Client:
-        """初始化向量数据库"""
+        """初始化向量数据库 - 使用新版本API"""
         persist_path = Path(self.config.get("vector_db_path", "./data/knowledge_base"))
         persist_path.mkdir(parents=True, exist_ok=True)
         
+        # ChromaDB 新版配置方式
         settings = Settings(
             chroma_db_impl="duckdb+parquet",
             persist_directory=str(persist_path),
-            anonymized_telemetry=False
+            anonymized_telemetry=False,
+            allow_reset=True  # 允许重置
         )
         
+        # 创建客户端
         client = chromadb.Client(settings)
         
-        # 创建或获取集合
+        # 创建或获取集合（使用新版本API）
         collections = {
             "standards": "标准规范知识",
             "best_practices": "最佳实践知识",
@@ -106,16 +108,46 @@ class KnowledgeBase:
         
         for collection_name, description in collections.items():
             try:
+                # 检查集合是否已存在
+                try:
+                    existing = client.get_collection(name=collection_name)
+                    logger.info(f"集合已存在: {collection_name}")
+                    continue
+                except:
+                    pass
+                
+                # 创建新集合
                 client.create_collection(
                     name=collection_name,
-                    meta_data={"description": description}
+                    metadata={"description": description},
+                    embedding_function=self._get_embedding_function()
                 )
                 logger.info(f"创建集合: {collection_name}")
+                
             except Exception as e:
-                # 集合已存在
-                pass
+                logger.error(f"创建集合 {collection_name} 失败: {str(e)}")
+                # 尝试使用默认集合
+                try:
+                    client.get_or_create_collection(
+                        name=collection_name,
+                        embedding_function=self._get_embedding_function()
+                    )
+                except Exception as e2:
+                    logger.error(f"备用创建集合也失败: {str(e2)}")
         
         return client
+    
+    def _get_embedding_function(self):
+        """获取嵌入函数 - 兼容新旧版本"""
+        try:
+            # 新版本 ChromaDB 需要嵌入函数
+            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+            
+            model_name = self.config.get("embedding_model", "BAAI/bge-small-zh-v1.5")
+            return SentenceTransformerEmbeddingFunction(model_name=model_name)
+        except ImportError:
+            # 旧版本或无法导入
+            return None
     
     def _init_relational_db(self) -> Any:
         """初始化关系数据库"""
@@ -123,7 +155,7 @@ class KnowledgeBase:
         db_url = f"sqlite:///{db_path}"
         
         engine = create_engine(db_url)
-        Base.meta_data.create_all(engine)
+        Base.metadata.create_all(engine)
         
         Session = sessionmaker(bind=engine)
         session = Session()
@@ -135,33 +167,83 @@ class KnowledgeBase:
         model_name = self.config.get("embedding_model", "BAAI/bge-small-zh-v1.5")
         
         try:
-            embedder = SentenceTransformer(model_name)
+            # 下载模型到本地缓存
+            cache_dir = Path("./data/models")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            embedder = SentenceTransformer(model_name, cache_folder=str(cache_dir))
             logger.info(f"加载嵌入模型: {model_name}")
             return embedder
         except Exception as e:
             logger.warning(f"无法加载模型 {model_name}: {str(e)}，使用备用模型")
-            return SentenceTransformer('all-MiniLM-L6-v2')
+            try:
+                # 尝试加载轻量级模型
+                return SentenceTransformer('all-MiniLM-L6-v2')
+            except Exception as e2:
+                logger.error(f"备用模型也加载失败: {str(e2)}")
+                # 返回一个简单的嵌入器
+                return SimpleEmbedder()
     
     def _load_initial_knowledge(self):
         """加载初始知识"""
-        initial_data_path = Path(__file__).parent.parent / "config" / "initial_knowledge.json"
+        # 先检查数据目录
+        data_dir = Path("./data")
+        data_dir.mkdir(exist_ok=True)
         
-        if initial_data_path.exists():
-            with open(initial_data_path, 'r', encoding='utf-8') as f:
-                initial_knowledge = json.load(f)
-                
-            for item in initial_knowledge:
+        # 初始知识数据
+        initial_knowledge = [
+            {
+                "content": "HIL测试硬件在环测试是通过实时仿真器模拟车辆环境，验证控制器软件的正确性。",
+                "type": "best_practice",
+                "domain": "HIL测试",
+                "tags": ["基础概念", "测试方法"],
+                "source": "行业最佳实践",
+                "meta_data": {
+                    "category": "concept",
+                    "complexity": "low"
+                }
+            },
+            {
+                "content": "VCU整车控制器主要负责整车模式管理、扭矩分配、能量回收控制、热管理控制等功能。",
+                "type": "controller",
+                "domain": "VCU",
+                "tags": ["功能说明", "控制器"],
+                "source": "技术文档",
+                "meta_data": {
+                    "category": "function",
+                    "name": "VCU基本功能"
+                }
+            },
+            {
+                "content": "故障注入测试步骤：1.设置正常工况 2.注入故障信号 3.监控系统响应 4.验证安全机制 5.恢复系统状态",
+                "type": "test_pattern",
+                "domain": "安全测试",
+                "tags": ["测试模式", "故障注入"],
+                "source": "测试经验",
+                "meta_data": {
+                    "name": "故障注入测试模式",
+                    "steps": ["设置", "注入", "监控", "验证", "恢复"],
+                    "success_rate": 0.95
+                }
+            }
+        ]
+        
+        for item in initial_knowledge:
+            try:
                 self.add_knowledge_item(
                     content=item["content"],
                     type=KnowledgeType(item["type"]),
                     domain=item["domain"],
-                    tags=item.get("tags", []),
+                    tags=item["tags"],
                     source=item["source"],
                     meta_data=item.get("meta_data", {})
                 )
-            
-            logger.info(f"加载初始知识: {len(initial_knowledge)} 项")
-    
+                logger.info(f"添加初始知识项: {item['domain']}")
+            except Exception as e:
+                logger.error(f"添加初始知识项失败: {str(e)}")
+        
+        logger.info(f"加载初始知识: {len(initial_knowledge)} 项")
+
     def add_knowledge_item(self,
                           content: str,
                           type: KnowledgeType,
@@ -200,27 +282,53 @@ class KnowledgeBase:
             confidence=1.0
         )
         
-        self.relational_db.add(record)
-        self.relational_db.commit()
+        try:
+            self.relational_db.add(record)
+            self.relational_db.commit()
+        except Exception as e:
+            logger.error(f"保存到关系数据库失败: {str(e)}")
+            self.relational_db.rollback()
+            raise
         
         # 保存到向量数据库
         collection_name = self._get_collection_name(type)
-        collection = self.vector_db.get_collection(collection_name)
+        try:
+            collection = self.vector_db.get_collection(collection_name)
+        except Exception as e:
+            logger.warning(f"获取集合 {collection_name} 失败，尝试创建: {str(e)}")
+            collection = self.vector_db.create_collection(
+                name=collection_name,
+                embedding_function=self._get_embedding_function()
+            )
         
-        embedding = self.embedder.encode(content).tolist()
-        
-        collection.add(
-            embeddings=[embedding],
-            documents=[content],
-            meta_datas=[{
+        # 生成嵌入向量
+        try:
+            embedding = self.embedder.encode(content).tolist()
+            
+            # 准备元数据
+            vector_metadata = {
                 "id": item_id,
                 "type": type.value,
                 "domain": domain,
                 "tags": json.dumps(tags, ensure_ascii=False),
-                "source": source
-            }],
-            ids=[item_id]
-        )
+                "source": source,
+                "meta_data": json.dumps(meta_data or {}, ensure_ascii=False)
+            }
+            
+            # 添加到集合
+            collection.add(
+                documents=[content],
+                metadatas=[vector_metadata],
+                ids=[item_id],
+                embeddings=[embedding]
+            )
+            
+        except Exception as e:
+            logger.error(f"保存到向量数据库失败: {str(e)}")
+            # 回滚关系数据库
+            self.relational_db.delete(record)
+            self.relational_db.commit()
+            raise
         
         logger.info(f"添加知识项: {item_id} ({type.value})")
         
@@ -604,3 +712,69 @@ def create_initial_knowledge():
     print(f"搜索到 {len(results)} 条结果")
     for result in results:
         print(f"- {result.content[:50]}... (置信度: {result.confidence:.2f})")
+
+class SimpleEmbedder:
+    """简单的嵌入器，用于备用"""
+    def __init__(self, dimension=384):
+        self.dimension = dimension
+    
+    def encode(self, text: str) -> List[float]:
+        """生成简单的嵌入向量"""
+        import hashlib
+        import random
+        
+        # 使用哈希生成确定性随机向量
+        hash_obj = hashlib.md5(text.encode())
+        seed = int(hash_obj.hexdigest()[:8], 16)
+        random.seed(seed)
+        
+        # 生成随机向量
+        vector = [random.uniform(-1, 1) for _ in range(self.dimension)]
+        
+        # 归一化
+        norm = sum(v*v for v in vector) ** 0.5
+        if norm > 0:
+            vector = [v/norm for v in vector]
+        
+        return vector
+    
+    def encode_batch(self, texts: List[str]) -> List[List[float]]:
+        """批量编码"""
+        return [self.encode(text) for text in texts]
+
+def create_initial_knowledge():
+    """创建初始知识库"""
+    config = {
+        "vector_db_path": "./data/knowledge_base",
+        "relational_db_path": "./data/knowledge_base/knowledge.db",
+        "embedding_model": "BAAI/bge-small-zh-v1.5"
+    }
+    
+    try:
+        # 确保数据目录存在
+        os.makedirs("./data/knowledge_base", exist_ok=True)
+        
+        # 创建知识库
+        knowledge_base = KnowledgeBase(config)
+        
+        print("✅ 知识库初始化完成")
+        
+        # 测试搜索
+        results = knowledge_base.search_knowledge(
+            query="HIL测试方法",
+            knowledge_types=[KnowledgeType.BEST_PRACTICE],
+            top_k=3
+        )
+        
+        print(f"搜索到 {len(results)} 条结果")
+        for result in results:
+            print(f"- {result.content[:50]}... (置信度: {result.confidence:.2f})")
+            
+    except Exception as e:
+        print(f"❌ 知识库初始化失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+if __name__ == "__main__":
+    create_initial_knowledge()
