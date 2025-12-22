@@ -23,6 +23,8 @@ from src.generator.constraint_integrator import ConstraintIntegrator
 from src.core.logic_explainer import LogicExplainer
 from config.config_manager import get_config_manager
 
+logger = logging.getLogger(__name__)
+
 @dataclass
 class WorkflowConfig:
     """工作流配置"""
