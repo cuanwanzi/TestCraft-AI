@@ -20,7 +20,7 @@ from src.core.template_learner import TemplateLearner
 from src.generator.template_selector import TemplateSelector
 from src.generator.case_generator import TestCaseGenerator
 from src.generator.constraint_integrator import ConstraintIntegrator
-from src.generator.logic_explainer import LogicExplainer
+from src.core.logic_explainer import LogicExplainer
 
 logger = logging.getLogger(__name__)
 
