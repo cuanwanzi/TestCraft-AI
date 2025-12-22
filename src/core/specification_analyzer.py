@@ -292,6 +292,15 @@ class SpecificationAnalyzer:
         text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
         return text
     
+    def _parse_doc(self, file_path: str) -> str:
+        """解析DOC文档（备用方法）"""
+        try:
+            # 尝试使用 docx 解析器
+            return self._parse_docx(file_path)
+        except:
+            # 如果失败，返回简单信息
+            return f"无法解析 .doc 文件，请转换为 .docx 格式: {file_path}"
+    
     def _parse_excel(self, file_path: str) -> str:
         """解析Excel文档"""
         excel_data = {}
