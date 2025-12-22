@@ -21,8 +21,7 @@ from src.generator.template_selector import TemplateSelector
 from src.generator.case_generator import TestCaseGenerator
 from src.generator.constraint_integrator import ConstraintIntegrator
 from src.core.logic_explainer import LogicExplainer
-
-logger = logging.getLogger(__name__)
+from config.config_manager import get_config_manager
 
 @dataclass
 class WorkflowConfig:
@@ -598,20 +597,16 @@ async def startup_event():
     """应用启动事件"""
     global workflow
     
-    # 从环境变量获取配置
-    import os
-    from dotenv import load_dotenv
+    # 获取配置管理器
+    config_manager = get_config_manager()
     
-    load_dotenv()
-    
-    api_key = os.getenv("deepseek")
-    if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY环境变量未设置")
+    # 获取API密钥
+    api_key = config_manager.get_deepseek_api_key()
     
     # 创建工作流配置
     config = WorkflowConfig(
         deepseek_api_key=api_key,
-        knowledge_base_path="./data/knowledge_base",
+        knowledge_base_path=config_manager.get("knowledge_base.vector_db_path", "./data/knowledge_base"),
         max_concurrent_tasks=5
     )
     
@@ -621,7 +616,7 @@ async def startup_event():
     # 启动工作流
     await workflow.start()
     
-    logger.info("应用启动完成")
+    logger.info(f"应用启动完成，API地址: {config_manager.get('api.host', '0.0.0.0')}:{config_manager.get('api.port', 8000)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
