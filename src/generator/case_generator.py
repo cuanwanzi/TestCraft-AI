@@ -1,4 +1,3 @@
-# src/generator/case_generator.py
 import json
 import re
 from typing import Dict, List, Optional, Any, Tuple
@@ -56,6 +55,54 @@ class TestCase:
     meta_data: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+# 定义 ClassificationResult 类（从 hierarchical_classifier 复制）
+@dataclass
+class ClassificationResult:
+    """分类结果数据类"""
+    domain: Any
+    subsystem: Any
+    test_patterns: List[Any]
+    confidence: float
+    reasoning: str
+    constraints: List[str]
+    standards: List[str]
+    metadata: Dict[str, Any]
+
+# 定义 TestDomain 和 TestSubsystem（从 hierarchical_classifier 复制）
+class TestDomain(Enum):
+    """测试领域枚举"""
+    HIL_TESTING = "HIL测试"
+    VEHICLE_EE_TESTING = "实车电子电器测试"
+    ENERGY_TESTING = "能耗测试"
+    BENCH_TESTING = "台架测试"
+    ENVIRONMENTAL_TESTING = "环境测试"
+    SAFETY_TESTING = "安全测试"
+
+class TestSubsystem(Enum):
+    """测试子系统枚举"""
+    VCU = "VCU控制器"
+    BMS = "BMS控制器"
+    MCU = "MCU控制器"
+    ESP = "ESP控制器"
+    ADAS = "ADAS控制器"
+    GATEWAY = "网关控制器"
+    POWER_SYSTEM = "电源系统"
+    NETWORK_SYSTEM = "网络系统"
+    SENSOR = "传感器系统"
+    ACTUATOR = "执行器系统"
+
+class TestPattern(Enum):
+    """测试模式枚举"""
+    FUNCTIONAL_TEST = "功能测试"
+    PERFORMANCE_TEST = "性能测试"
+    SAFETY_TEST = "安全测试"
+    RELIABILITY_TEST = "可靠性测试"
+    ENVIRONMENTAL_TEST = "环境测试"
+    COMPATIBILITY_TEST = "兼容性测试"
+    FAULT_INJECTION = "故障注入测试"
+    BOUNDARY_TEST = "边界测试"
+    DIAGNOSTIC_TEST = "诊断测试"
 
 class TestCaseGenerator:
     """测试用例生成器"""
@@ -196,7 +243,7 @@ class TestCaseGenerator:
     async def generate_test_case(self,
                                requirement: str,
                                classification: ClassificationResult,
-                               spec_analysis: SpecificationAnalysisResult,
+                               spec_analysis: Any,
                                template: Optional[Dict[str, Any]] = None) -> TestCase:
         """生成测试用例"""
         
@@ -206,9 +253,10 @@ class TestCaseGenerator:
         if template:
             selected_template = template
         else:
-            selected_template = await self.template_selector.select_template(
+            template_selection = await self.template_selector.select_template(
                 requirement, classification, spec_analysis
             )
+            selected_template = template_selection[0] if template_selection else None
         
         # 2. 生成测试步骤
         test_steps = await self._generate_test_steps(
@@ -235,8 +283,16 @@ class TestCaseGenerator:
         )
         
         # 6. 集成约束
+        integrated_constraints = []
+        if hasattr(spec_analysis, 'extracted_constraints'):
+            constraints_to_integrate = spec_analysis.extracted_constraints
+        elif isinstance(spec_analysis, dict) and 'extracted_constraints' in spec_analysis:
+            constraints_to_integrate = spec_analysis['extracted_constraints']
+        else:
+            constraints_to_integrate = []
+            
         integrated_constraints = await self.constraint_integrator.integrate(
-            test_steps, spec_analysis.extracted_constraints
+            test_steps, constraints_to_integrate
         )
         
         # 7. 构建测试用例
@@ -260,7 +316,7 @@ class TestCaseGenerator:
     async def _generate_test_steps(self,
                                   requirement: str,
                                   classification: ClassificationResult,
-                                  spec_analysis: SpecificationAnalysisResult,
+                                  spec_analysis: Any,
                                   template: Dict[str, Any]) -> List[TestStep]:
         """生成测试步骤"""
         
@@ -301,7 +357,8 @@ class TestCaseGenerator:
         
         # 提取模板信息
         action_template = step_template.get("action_template", "执行测试操作")
-        step_type = TestStepType(step_template.get("step_type", "stimulus"))
+        step_type_str = step_template.get("step_type", "stimulus")
+        step_type = TestStepType(step_type_str)
         verification_method = step_template.get("verification_method", "通用验证")
         
         # 填充模板变量
@@ -309,9 +366,9 @@ class TestCaseGenerator:
             template=action_template,
             context={
                 "requirement": requirement,
-                "domain": classification.domain.value,
-                "subsystem": classification.subsystem.value,
-                "test_patterns": [p.value for p in classification.test_patterns],
+                "domain": classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain),
+                "subsystem": classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem),
+                "test_patterns": [p.value if hasattr(p, 'value') else str(p) for p in classification.test_patterns],
                 "step_number": step_number,
                 **context
             }
@@ -398,6 +455,7 @@ class TestCaseGenerator:
         except Exception as e:
             logger.error(f"AI填充模板失败: {str(e)}")
             # 回退：移除变量
+            import re
             return re.sub(r'\{.*?\}', '具体值', template)
     
     async def _generate_step_data(self,
@@ -561,8 +619,9 @@ class TestCaseGenerator:
         template = templates.get(step_type, "步骤执行成功")
         
         # 填充变量
+        subsystem = classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem)
         expected_result = template.format(
-            subsystem=classification.subsystem.value,
+            subsystem=subsystem,
             action=action,
             parameter="性能指标"  # 可以根据实际情况具体化
         )
@@ -572,8 +631,13 @@ class TestCaseGenerator:
     async def _generate_steps_with_ai(self,
                                      requirement: str,
                                      classification: ClassificationResult,
-                                     spec_analysis: SpecificationAnalysisResult) -> List[TestStep]:
+                                     spec_analysis: Any) -> List[TestStep]:
         """使用AI生成测试步骤"""
+        
+        # 获取域和子系统信息
+        domain_value = classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain)
+        subsystem_value = classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem)
+        test_patterns = [p.value if hasattr(p, 'value') else str(p) for p in classification.test_patterns]
         
         prompt = f"""
         请为以下测试需求生成详细的测试步骤序列：
@@ -581,9 +645,9 @@ class TestCaseGenerator:
         测试需求：{requirement}
 
         测试上下文：
-        - 测试领域：{classification.domain.value}
-        - 目标系统：{classification.subsystem.value}
-        - 测试模式：{', '.join([p.value for p in classification.test_patterns])}
+        - 测试领域：{domain_value}
+        - 目标系统：{subsystem_value}
+        - 测试模式：{', '.join(test_patterns)}
         - 相关标准：{', '.join(classification.standards[:5])}
         - 约束条件：{', '.join(classification.constraints[:5])}
 
@@ -612,7 +676,15 @@ class TestCaseGenerator:
                 {"role": "user", "content": prompt}
             ])
             
-            steps_data = json.loads(response["choices"][0]["message"]["content"])
+            # 尝试解析JSON响应
+            content = response["choices"][0]["message"]["content"]
+            # 清理可能的Markdown格式
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+            
+            steps_data = json.loads(content)
             
             steps = []
             for step_data in steps_data:
@@ -713,8 +785,8 @@ class TestCaseGenerator:
             "meta_data": {
                 "generated_at": datetime.now().isoformat(),
                 "requirement": requirement[:100],
-                "domain": classification.domain.value,
-                "subsystem": classification.subsystem.value
+                "domain": classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain),
+                "subsystem": classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem)
             },
             "input_data": {},
             "boundary_values": {},
@@ -741,7 +813,7 @@ class TestCaseGenerator:
     async def _generate_preconditions(self,
                                     requirement: str,
                                     classification: ClassificationResult,
-                                    spec_analysis: SpecificationAnalysisResult) -> List[str]:
+                                    spec_analysis: Any) -> List[str]:
         """生成前置条件"""
         
         preconditions = []
@@ -749,19 +821,20 @@ class TestCaseGenerator:
         # 1. 基础前置条件
         preconditions.extend([
             f"测试环境准备就绪",
-            f"{classification.subsystem.value}处于初始状态",
+            f"{classification.subsystem.value if hasattr(classification.subsystem, 'value') else classification.subsystem}处于初始状态",
             f"测试设备连接正常",
             f"测试软件版本正确"
         ])
         
         # 2. 基于领域的特殊前置条件
-        if classification.domain == TestDomain.HIL_TESTING:
+        domain_value = classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain)
+        if domain_value == "HIL测试":
             preconditions.extend([
                 "HIL测试平台已启动",
                 "仿真模型加载完成",
                 "实时系统运行正常"
             ])
-        elif classification.domain == TestDomain.VEHICLE_EE_TESTING:
+        elif domain_value == "实车电子电器测试":
             preconditions.extend([
                 "实车电源接通",
                 "测试仪器校准完成",
@@ -770,10 +843,11 @@ class TestCaseGenerator:
         
         # 3. 基于约束的前置条件
         for constraint in classification.constraints[:3]:
-            if "环境" in constraint or "温度" in constraint:
-                preconditions.append("环境温度符合测试要求")
-            elif "电源" in constraint or "电压" in constraint:
-                preconditions.append("电源系统稳定可靠")
+            if isinstance(constraint, str):
+                if "环境" in constraint or "温度" in constraint:
+                    preconditions.append("环境温度符合测试要求")
+                elif "电源" in constraint or "电压" in constraint:
+                    preconditions.append("电源系统稳定可靠")
         
         return list(set(preconditions))  # 去重
     
@@ -786,17 +860,19 @@ class TestCaseGenerator:
         expected_results = []
         
         # 1. 功能验证结果
-        expected_results.append(f"{classification.subsystem.value}功能正常")
+        subsystem_value = classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem)
+        expected_results.append(f"{subsystem_value}功能正常")
         
         # 2. 性能验证结果
-        if any(p.value in ["性能测试", "响应测试"] for p in classification.test_patterns):
+        test_patterns = [p.value if hasattr(p, 'value') else str(p) for p in classification.test_patterns]
+        if any(p in ["性能测试", "响应测试"] for p in test_patterns):
             expected_results.extend([
                 "响应时间符合要求",
                 "系统性能满足规格"
             ])
         
         # 3. 安全验证结果
-        if any(p.value in ["安全测试", "故障注入测试"] for p in classification.test_patterns):
+        if any(p in ["安全测试", "故障注入测试"] for p in test_patterns):
             expected_results.extend([
                 "安全机制正确触发",
                 "故障处理符合预期",
@@ -834,7 +910,7 @@ class TestCaseGenerator:
         
         # 基于约束的要求
         for constraint in classification.constraints[:3]:
-            if "时间" in constraint or "响应" in constraint:
+            if isinstance(constraint, str) and ("时间" in constraint or "响应" in constraint):
                 pass_criteria_parts.append("时间性能满足约束要求")
                 break
         
@@ -845,7 +921,7 @@ class TestCaseGenerator:
     def _build_test_case(self,
                         requirement: str,
                         classification: ClassificationResult,
-                        spec_analysis: SpecificationAnalysisResult,
+                        spec_analysis: Any,
                         test_steps: List[TestStep],
                         test_data: Dict[str, Any],
                         preconditions: List[str],
@@ -856,8 +932,11 @@ class TestCaseGenerator:
         """构建测试用例"""
         
         # 生成用例ID和名称
-        case_id = f"TC_{classification.subsystem.value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        case_name = f"{classification.subsystem.value} {classification.test_patterns[0].value}测试"
+        subsystem_value = classification.subsystem.value if hasattr(classification.subsystem, 'value') else str(classification.subsystem)
+        test_patterns = [p.value if hasattr(p, 'value') else str(p) for p in classification.test_patterns]
+        
+        case_id = f"TC_{subsystem_value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        case_name = f"{subsystem_value} {test_patterns[0] if test_patterns else '功能'}测试"
         
         # 构建约束信息
         constraint_info = []
@@ -868,11 +947,12 @@ class TestCaseGenerator:
                 constraint_info.append(asdict(constraint))
         
         # 构建元数据
+        domain_value = classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain)
         meta_data = {
             "generation_method": "template_based" if template else "ai_generated",
             "template_used": template.get("id") if template else None,
             "classification_confidence": classification.confidence,
-            "spec_analysis_quality": spec_analysis.quality_score,
+            "spec_analysis_quality": getattr(spec_analysis, 'quality_score', 0.0) if hasattr(spec_analysis, 'quality_score') else spec_analysis.get('quality_score', 0.0) if isinstance(spec_analysis, dict) else 0.0,
             "step_count": len(test_steps),
             "constraint_count": len(constraint_info)
         }
@@ -881,9 +961,9 @@ class TestCaseGenerator:
             id=case_id,
             name=case_name,
             description=requirement,
-            domain=classification.domain.value,
-            subsystem=classification.subsystem.value,
-            test_patterns=[p.value for p in classification.test_patterns],
+            domain=domain_value,
+            subsystem=subsystem_value,
+            test_patterns=test_patterns,
             preconditions=preconditions,
             test_steps=test_steps,
             expected_results=expected_results,
@@ -900,6 +980,7 @@ class TestCaseGenerator:
 
 # 使用示例
 async def main():
+    """使用示例"""
     from deepseek_client import DeepSeekClient, DeepSeekConfig
     from template_selector import TemplateSelector
     from constraint_integrator import ConstraintIntegrator
@@ -909,15 +990,13 @@ async def main():
     client = DeepSeekClient(config)
     
     # 创建依赖组件
-    template_selector = TemplateSelector(knowledge_base=None)  # 需要知识库
+    template_selector = TemplateSelector(knowledge_base=None, template_learner=None)  # 需要知识库
     constraint_integrator = ConstraintIntegrator()
     
     # 创建生成器
     generator = TestCaseGenerator(client, template_selector, constraint_integrator)
     
     # 模拟分类结果
-    from hierarchical_classifier import ClassificationResult, TestDomain, TestSubsystem, TestPattern
-    
     classification = ClassificationResult(
         domain=TestDomain.HIL_TESTING,
         subsystem=TestSubsystem.VCU,
@@ -926,7 +1005,7 @@ async def main():
         reasoning="匹配VCU和HIL测试关键词",
         constraints=["响应时间<100ms", "符合ISO 26262 ASIL C"],
         standards=["ISO 26262"],
-        meta_data={}
+        metadata={}
     )
     
     # 模拟规范分析结果
@@ -935,8 +1014,8 @@ async def main():
     spec_analysis = SpecificationAnalysisResult(
         requirement="测试需求",
         extracted_constraints=[
-            Constraint(id="C001", content="电压范围9-16V", source="spec", type="performance", priority="high", verification_method="测试"),
-            Constraint(id="C002", content="温度范围-40~85°C", source="spec", type="environmental", priority="medium", verification_method="测试")
+            {"id": "C001", "content": "电压范围9-16V", "source": "spec", "type": "performance", "priority": "high", "verification_method": "测试"},
+            {"id": "C002", "content": "温度范围-40~85°C", "source": "spec", "type": "environmental", "priority": "medium", "verification_method": "测试"}
         ],
         identified_standards=["ISO 26262"],
         specification_details={},
@@ -963,3 +1042,7 @@ async def main():
     # 打印前几个步骤
     for step in test_case.test_steps[:3]:
         print(f"步骤{step.step_number}: {step.action}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
