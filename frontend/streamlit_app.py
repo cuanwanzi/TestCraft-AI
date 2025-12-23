@@ -938,8 +938,8 @@ class AutomotiveTestCaseGenerator:
         st.markdown(
             '<div style="text-align: center; color: #666; font-size: 0.8rem;">'
             '🚗 汽车测试用例生成系统 v1.0 | '
-            '© 2024 智能测试团队 | '
-            '<a href="https://github.com/your-repo" target="_blank">GitHub</a>'
+            '© 测试| '
+            '<a href="https://github.com/cuanwanzi/TestCraft-AI" target="_blank">GitHub</a>'
             '</div>',
             unsafe_allow_html=True
         )
